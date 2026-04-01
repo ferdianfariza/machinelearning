@@ -1,26 +1,42 @@
-# Dokumentasi Notebook Flood Semantic Segmentation
+# Dokumentasi Teknis Notebook Flood Semantic Segmentation
 
-Dokumen ini menjelaskan isi notebook [UNET++/UNET++.ipynb](UNET++/UNET++.ipynb) dengan bahasa ringkas dan terstruktur, supaya mudah dipakai saat diminta menjelaskan proyek.
+Dokumen ini menjelaskan implementasi pada notebook [UNET/UNet4Fold.ipynb](UNET/UNet4Fold.ipynb) dengan fokus teknis agar mudah dipertanggungjawabkan saat presentasi metodologi.
 
-## 1. Tujuan Proyek
+## 1. Ruang Lingkup dan Tujuan
 
-Proyek ini membangun model semantic segmentation untuk mendeteksi area banjir pada citra.
+Tujuan utama proyek adalah semantic segmentation biner untuk memisahkan piksel banjir (`1`) dan non-banjir (`0`) dari citra input.
 
-Target spesifikasi utama:
+Spesifikasi eksperimen yang diimplementasikan:
 
-- Input image dan mask di-resize ke 256x256.
-- Normalisasi image ke rentang [0, 1].
-- Mask dibinarisasi dengan threshold 0.5.
-- Format mask menjadi (H, W, 1) sebelum jadi tensor.
-- Data augmentation menggunakan Albumentations.
-- Validasi menggunakan 4-Fold Cross-Validation.
-- Model: UNet + EfficientNet-B0 (pretrained ImageNet).
-- Training: 25 epoch, batch size 8, Adam (lr 1e-4), BCELoss.
-- Evaluasi: Accuracy, Precision, Recall, F1, IoU.
+- Ukuran input: 256x256.
+- Mask biner dengan threshold 0.5.
+- Model: `UNet(encoder=efficientnet-b0, pretrained=imagenet)`.
+- Optimizer: Adam, learning rate `1e-4`.
+- Loss: `BCELoss`.
+- Validasi: 4-Fold Cross Validation.
+- Metrik: Accuracy, Precision, Recall, F1-Score, IoU.
 
-## 2. Struktur Dataset yang Dipakai
+## 2. Konfigurasi Eksperimen
 
-Notebook ini disiapkan untuk struktur folder tanpa metadata.csv:
+Konfigurasi dipusatkan pada dictionary `CONFIG` agar parameter training konsisten di semua cell:
+
+- `SEED = 42`
+- `IMAGE_SIZE = 256`
+- `BATCH_SIZE = 8`
+- `EPOCHS = 25`
+- `LR = 1e-4`
+- `N_SPLITS = 4`
+- `THRESHOLD = 0.5`
+- `DATASET_SLUG = "lihuayang111265/flood-semantic-segmentation-dataset"`
+
+Device dipilih otomatis:
+
+- GPU jika `torch.cuda.is_available()` bernilai true.
+- CPU jika GPU tidak tersedia.
+
+## 3. Spesifikasi Dataset dan Validasi Input
+
+Notebook menggunakan dataset Kaggle dengan struktur direktori:
 
 ```text
 dataset/
@@ -32,205 +48,199 @@ dataset/
     labels/
 ```
 
-Catatan:
+### 3.1 Discovery path dataset
 
-- Loader juga mencoba beberapa variasi nama folder umum (misalnya image/label, images/masks).
-- Jika dataset dibungkus satu folder tambahan, notebook akan mencoba retry otomatis ke folder di dalamnya.
+Pipeline data melakukan:
 
-## 3. Alur Besar Pipeline
+1. Unduh dataset via `kagglehub.dataset_download`.
+2. Cari base folder `dataset/` melalui fungsi `find_dataset_base_dir`.
+3. Ambil pasangan split melalui `collect_pairs_from_split(base_dir, split_name)`.
 
-1. Cek GPU dan install dependency.
-2. Set konfigurasi eksperimen.
-3. Download/baca dataset dari Kaggle.
-4. Deteksi pasangan folder image-mask.
-5. Validasi file image-mask yang benar-benar bisa dibaca.
-6. Bangun dataset + data loader dengan augmentasi.
-7. Build model UNet EfficientNet-B0.
-8. Training dan evaluasi 4-fold.
-9. Simpan checkpoint terbaik tiap fold.
-10. Ringkas metrik, plot kurva, dan tampilkan visual prediksi.
-11. Cetak checklist implementasi spesifikasi.
+### 3.2 Aturan pairing image-mask
 
-## 4. Penjelasan Per Cell (Urutan Eksekusi)
+Untuk setiap file di `images/`, pasangan mask dicari di `labels/` dengan nama file yang sama.
 
-Cell 1:
+Contoh:
 
-- Judul dan daftar spesifikasi eksperimen.
+- `train/images/0001.jpg` dipasangkan dengan `train/labels/0001.jpg`.
 
-Cell 2:
+File yang tidak punya pasangan label akan di-skip dan dihitung ke statistik `missing`.
 
-- Menjalankan `nvidia-smi` untuk cek GPU.
+### 3.3 Robust read dan quality gate
 
-Cell 3:
+Pembacaan file menggunakan dua tahap:
 
-- Install dependency utama: PyTorch, segmentation-models-pytorch, Albumentations, OpenCV, sklearn, pandas, matplotlib, kagglehub.
+1. OpenCV (`cv2.imread`).
+2. Fallback PIL jika OpenCV gagal decode.
 
-Cell 4:
+Jika image atau mask tidak bisa dibaca, sampel di-skip (`decode_fail`).
 
-- Import library.
-- Definisikan `CONFIG` (seed, image size, batch size, epochs, lr, n_splits, threshold, workers, dataset slug).
-- Inisialisasi device (`cuda` atau `cpu`).
+Hanya pasangan valid yang masuk ke `valid_samples`.
 
-Cell 5:
+## 4. Data Pipeline di Dataset Class
 
-- Utility fungsi data:
-- Login Kaggle opsional.
-- Deteksi path dataset dari Kaggle input.
-- Fungsi baca image/mask (OpenCV + fallback PIL).
-- Pencarian pasangan folder image-mask.
-- Koleksi sampel valid dan statistik missing/decode-fail.
+Kelas `FloodDataset` menerapkan urutan transformasi berikut untuk setiap sampel:
 
-Cell 6:
+1. Read image RGB dan mask grayscale.
+2. Resize image dan mask ke 256x256.
+3. Konversi mask ke float (`mask / 255.0`).
+4. Binarisasi mask: `mask > 0.5`.
+5. Ubah shape mask menjadi `(H, W, 1)`.
+6. Terapkan augmentasi/normalisasi via Albumentations.
+7. Konversi ke tensor dengan format channel-first `(C, H, W)`.
 
-- Eksekusi loading dataset:
-- Login Kaggle.
-- Download atau ambil dataset dari path lokal Kaggle.
-- Kumpulkan `valid_samples` dari folder split.
-- Jika tidak ditemukan, coba nested root otomatis.
-- Menampilkan ringkasan jumlah data valid.
+Output `__getitem__`:
 
-Cell 7:
+- `image`: `torch.float32`, shape `(3, 256, 256)`.
+- `mask`: `torch.float32`, shape `(1, 256, 256)`.
 
-- Definisi class `FloodDataset`.
-- Proses resize, normalisasi, threshold mask, reshape mask.
-- Definisi transform train/val dengan Albumentations.
-- Definisi `make_loaders`.
+## 5. Augmentasi dan Normalisasi
 
-Cell 8:
+### 5.1 Train transform
 
-- Definisi model `smp.Unet` dengan encoder `efficientnet-b0`.
-- Set loss `nn.BCELoss()`.
-- Definisi fungsi hitung confusion dan metrik.
+- `Resize(256,256)`
+- `HorizontalFlip(p=0.5)`
+- `Affine(scale, translation, rotation)`
+- `RandomBrightnessContrast(p=0.5)`
+- `Normalize(max_pixel_value=255.0)`
+- `ToTensorV2(transpose_mask=True)`
 
-Cell 9:
+### 5.2 Validation transform
 
-- Definisi `train_one_epoch` dan `validate_one_epoch`.
+- `Resize(256,256)`
+- `Normalize(max_pixel_value=255.0)`
+- `ToTensorV2(transpose_mask=True)`
 
-Cell 10:
+Normalisasi memastikan nilai piksel input berada pada skala `[0,1]` saat masuk model.
 
-- Loop utama 4-fold CV.
-- Training 25 epoch per fold.
-- Simpan checkpoint terbaik berdasarkan IoU validasi.
-- Bangun `history_df` dan `best_fold_df`.
+## 6. Arsitektur Model dan Objective Function
 
-Cell 11:
+Model dibangun dengan `segmentation_models_pytorch`:
 
-- Tampilkan ringkasan best score per fold.
-- Hitung mean/std metrik.
-- Plot kurva loss dan IoU.
+- Arsitektur: U-Net.
+- Encoder: EfficientNet-B0 pretrained ImageNet.
+- Input channels: 3.
+- Output classes: 1.
+- Aktivasi akhir: sigmoid.
 
-Cell 12:
+Loss function:
 
-- Ambil fold terbaik.
-- Load model dari checkpoint terbaik.
+- `nn.BCELoss()` digunakan karena target segmentasi bersifat biner.
 
-Cell 13:
+## 7. Training Loop dan Validasi
 
-- Visualisasi triplet: Input, Ground Truth, Predicted Mask.
+### 7.1 Prosedur per epoch
 
-Cell 14:
+Fungsi `train_one_epoch`:
 
-- Evaluasi ulang metrik pada validation set fold terbaik.
+1. `model.train()`.
+2. Forward pass.
+3. Hitung `BCELoss`.
+4. Backpropagation.
+5. `optimizer.step()`.
 
-Cell 15:
+Fungsi `validate_one_epoch`:
 
-- Cetak checklist naratif implementasi spesifikasi jurnal.
+1. `model.eval()` dengan `torch.no_grad()`.
+2. Hitung loss validasi.
+3. Binarisasi prediksi dengan threshold 0.5.
+4. Agregasi confusion components (`tp, tn, fp, fn`).
+5. Hitung metrik akhir dari agregat global.
 
-Cell 16:
+### 7.2 Rumus metrik
 
-- Validasi status implementasi secara boolean dan kesimpulan otomatis.
+Metrik dihitung dari total `tp, tn, fp, fn`:
 
-## 5. Konsep Penting (Saat Menjelaskan)
+- Accuracy = $(tp + tn) / (tp + tn + fp + fn)$
+- Precision = $tp / (tp + fp)$
+- Recall = $tp / (tp + fn)$
+- F1 = $2PR/(P+R)$
+- IoU = $tp / (tp + fp + fn)$
 
-Normalisasi:
+Semua metrik memakai epsilon kecil untuk menghindari pembagian nol.
 
-- Image dinormalisasi ke [0, 1] melalui `A.Normalize(..., max_pixel_value=255.0)`.
+## 8. Skema 4-Fold Cross Validation
 
-Binarisasi mask:
+Skema CV memakai `KFold(n_splits=4, shuffle=True, random_state=SEED)`.
 
-- Nilai mask diubah menjadi 0/1 dengan threshold 0.5.
+Alur tiap fold:
 
-Cross-validation:
+1. Bangun `train_loader` dan `val_loader` dari indeks fold.
+2. Inisialisasi model baru dan optimizer baru.
+3. Train 25 epoch.
+4. Simpan checkpoint saat IoU validasi meningkat.
+5. Simpan history epoch-level ke dataframe.
 
-- Data dibagi 4 fold.
-- Tiap fold bergantian menjadi validation set.
-- Hasil akhir dilihat dari ringkasan performa semua fold.
+Output utama:
 
-Pemilihan model terbaik:
+- `history_df`: seluruh riwayat train/val semua fold.
+- `best_fold_df`: ringkasan performa terbaik per fold.
 
-- Checkpoint per fold disimpan saat IoU validasi meningkat.
-- Fold terbaik dipilih dari IoU tertinggi.
+## 9. Checkpointing dan Pemilihan Model Terbaik
 
-## 6. Cara Menjelaskan Proyek (Template Singkat)
+Setiap fold menyimpan file checkpoint:
 
-Gunakan alur berikut saat presentasi:
+- Path: `checkpoints_unet_effb0_4fold/best_fold_{k}.pth`
 
-1. Masalah:
+Isi checkpoint mencakup:
 
-- "Saya mengerjakan segmentasi banjir untuk memisahkan area banjir vs non-banjir pada citra."
+- `model_state_dict`
+- `fold`, `epoch`
+- `val_metrics`
+- salinan `config`
 
-2. Data:
+Fold terbaik global dipilih dari nilai IoU tertinggi pada `best_fold_df`.
 
-- "Dataset disusun ke train/val dengan folder images dan labels, lalu saya validasi agar hanya pasangan file yang benar yang dipakai."
+## 10. Evaluasi Akhir dan Visualisasi
 
-3. Metode:
+Notebook menyediakan dua bentuk evaluasi:
 
-- "Saya memakai UNet dengan backbone EfficientNet-B0 pretrained, karena balance antara akurasi dan efisiensi."
+1. Kuantitatif:
 
-4. Training:
+- tabel best per fold,
+- ringkasan mean/std antar fold,
+- evaluasi ulang pada fold terbaik.
 
-- "Konfigurasi utama: 256x256, batch 8, 25 epoch, Adam lr 1e-4, BCELoss, dengan 4-fold cross-validation."
+2. Kualitatif:
 
-5. Evaluasi:
+- visualisasi triplet: Input, Ground Truth, Predicted Mask.
 
-- "Saya laporkan Accuracy, Precision, Recall, F1, dan IoU, lalu pilih model terbaik berdasarkan IoU validasi."
+Visualisasi dipakai untuk memverifikasi bahwa segmentasi tidak hanya bagus secara angka, tetapi juga masuk akal secara spasial.
 
-6. Hasil Visual:
+## 11. Kontrak Input-Output untuk Deployment API
 
-- "Saya tampilkan input, ground truth, dan prediksi untuk melihat kualitas segmentasi secara kualitatif."
+Bagian inferensi notebook sudah dapat dijadikan fondasi API (misalnya FastAPI/Gradio):
 
-## 7. Output Penting yang Perlu Diperhatikan
+- Input API: 1 citra RGB.
+- Preprocess: resize 256x256 + normalisasi.
+- Inferensi: model sigmoid output probabilitas piksel.
+- Postprocess: threshold 0.5 menjadi mask biner.
+- Output API: mask biner dan/atau overlay visual.
 
-Saat menjalankan notebook, fokus pada:
+Catatan penting:
 
-- `Valid samples`: memastikan data terbaca dengan baik.
-- `best_fold_df`: performa terbaik setiap fold.
-- `summary_df`: mean dan std performa antar fold.
-- Plot loss/IoU: untuk melihat stabilitas training.
-- Visualisasi prediksi: mengecek kualitas mask secara visual.
+- Preprocessing di API harus identik dengan preprocessing training agar distribusi input konsisten.
 
-## 8. Troubleshooting Cepat
+## 12. Troubleshooting Teknis
 
-Kasus: FileNotFoundError saat load data.
+Kasus: Tidak ada sampel valid.
 
-- Cek apakah struktur folder mengikuti format train/images, train/labels, val/images, val/labels.
-- Lihat output `Candidate folder pairs`.
-- Pastikan nama file image-mask cocok (stem sama).
-
-Kasus: Banyak data ke-skip.
-
-- Cek `Missing file/label skipped` dan `Decode fail skipped`.
-- Verifikasi file rusak atau ekstensi tidak umum.
+- Pastikan struktur folder sesuai `dataset/train|val/images|labels`.
+- Pastikan nama file image dan label cocok.
+- Periksa output `missing` dan `decode_fail`.
 
 Kasus: OOM GPU.
 
-- Turunkan `BATCH_SIZE` (misalnya 8 ke 4).
+- Turunkan `BATCH_SIZE` (contoh: 8 ke 4).
+- Aktifkan mixed precision jika ingin optimasi lanjutan.
 
-Kasus: Performa rendah.
+Kasus: IoU stagnan.
 
-- Tambah epoch.
-- Coba tuning augmentasi.
-- Coba loss kombinasi (misalnya BCE + Dice) jika ingin eksperimen lanjutan.
+- Coba kombinasi loss (BCE + Dice).
+- Tuning augmentasi geometrik.
+- Tambah epoch dan scheduler learning rate.
 
-## 9. Ringkasan 1 Menit
+## 13. Lokasi File
 
-- Proyek ini melakukan segmentasi banjir dengan UNet + EfficientNet-B0.
-- Data diproses ke 256x256, image dinormalisasi, mask dibinarisasi.
-- Training memakai 4-fold CV agar evaluasi lebih robust.
-- Metrik utama mencakup Accuracy, Precision, Recall, F1, dan IoU.
-- Hasil dievaluasi secara kuantitatif (tabel metrik) dan kualitatif (visualisasi mask).
-
-## 10. Lokasi File
-
-- Notebook utama: [UNET++/UNET++.ipynb](UNET++/UNET++.ipynb)
-- Dokumentasi ini: [docs.md](docs.md)
+- Notebook utama: [UNET/UNet4Fold.ipynb](UNET/UNet4Fold.ipynb)
+- Dokumentasi teknis: [UNET/Unet4Fold.md](UNET/Unet4Fold.md)
