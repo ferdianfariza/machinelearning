@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Flood Segmentation MVP</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="orb orb-a" aria-hidden="true"></div>
+    <div class="orb orb-b" aria-hidden="true"></div>
+
+    <main class="shell">
+      <header class="hero">
+        <p class="kicker">UNet4Fold Local Inference</p>
+        <h1>Flood Segmentation Preview</h1>
+        <p class="subtitle">
+          Upload one image and inspect a binary black-white flood mask generated
+          by the model.
+        </p>
+      </header>
+
+      <section class="controls">
+        <label class="file-label" for="imageInput">Choose Image</label>
+        <input
+          id="imageInput"
+          type="file"
+          accept=".jpg,.jpeg,.png,image/jpeg,image/png"
+        />
+        <button id="runBtn" type="button">Run Inference</button>
+      </section>
+
+      <p id="status" class="status">Select a file, then run inference.</p>
+
+      <section class="results">
+        <article class="panel">
+          <h2>Original</h2>
+          <img
+            id="originalPreview"
+            class="preview"
+            alt="Original uploaded image preview"
+          />
+        </article>
+
+        <article class="panel">
+          <h2>Predicted Mask</h2>
+          <img id="maskPreview" class="preview" alt="Predicted mask preview" />
+        </article>
+      </section>
+
+      <footer class="meta" id="metaInfo">
+        Inference metadata will appear here.
+      </footer>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
